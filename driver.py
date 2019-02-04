@@ -112,7 +112,7 @@ def job():
     articles = articles.map(lambda x: x[1])
     results = articles.collect()
 
-    res = es.delete(index="articles", doc_type='_doc', body=searchBody)
+    res = es.delete_by_query(index="articles", doc_type='_doc', body=searchBody)
 
     for article in results:
         res = es.index(index="articles", doc_type='_doc', body=article)
@@ -127,7 +127,7 @@ logging.basicConfig(level=logging.INFO, filename='app.log', filemode='w', format
 s = sched.scheduler(time.time, time.sleep)
 def run_job(sc): 
     job()
-    s.enter(21600, 1, job, (sc,))
+    s.enter(10800, 1, run_job, (sc,))
 
-s.enter(21600, 1, job, (s,))
+s.enter(10800, 1, run_job, (s,))
 s.run()
