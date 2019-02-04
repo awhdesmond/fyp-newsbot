@@ -34,7 +34,7 @@ class CNAAgent(object):
         result_text = ""
 
         for text in texts:
-            if "©" not in text.get_text():
-                result_text = result_text + text.get_text() + "\n"
+            if "©" not in text.get_text().encode('utf-8'):
+                result_text = (result_text + text.get_text() + "\n").encode('utf-8')
         
         return result_text
