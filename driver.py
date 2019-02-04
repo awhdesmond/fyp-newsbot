@@ -121,7 +121,7 @@ def job():
     logging.info('Number of articles added: %d', len(results))
 
 # Logging
-logging.basicConfig(filename='app.log', filemode='w', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, filename='app.log', filemode='w', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Schedule to run every 6 hours
 s = sched.scheduler(time.time, time.sleep)
