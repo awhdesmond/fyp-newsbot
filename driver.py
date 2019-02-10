@@ -74,13 +74,14 @@ def fulfillArticleContent(metadata):
         return article
 
 
+conf = SparkConf().setMaster("local").setAppName("NewsAgent")
+sc = SparkContext(conf=conf)
+
+es = Elasticsearch(['http://128.199.101.98:9200'])
 
 ## Driver Code
 def job():
     logging.info('Start of Spark Job.')
-
-    conf = SparkConf().setMaster("local").setAppName("NewsAgent")
-    sc = SparkContext(conf=conf)
 
     domains = sc.parallelize(["straitstimes.com", "channelnewsasia.com", "todayonline.com", "scmp.com"])
     domainsParams = domains.flatMap(generateDomainParmas)
@@ -93,8 +94,6 @@ def job():
     results = articles.collect()
 
     # Elastic Search Code
-    es = Elasticsearch(['http://128.199.101.98:9200'])
-
     for article in results:
         res = es.index(index="articles", doc_type='_doc', body=article)
 
@@ -126,7 +125,7 @@ def job():
 # Logging
 logging.basicConfig(level=logging.INFO, filename='app.log', filemode='w', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# Schedule to run every 6 hours
+# Schedule to run every 3 hours
 s = sched.scheduler(time.time, time.sleep)
 def run_job(sc): 
     job()
