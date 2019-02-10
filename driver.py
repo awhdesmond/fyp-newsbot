@@ -90,7 +90,8 @@ def job():
 
     metadata.persist()
 
-    articles = metadata.map(fulfillArticleContent)
+    articles = metadata.map(fulfillArticleContent).filter(lambda a: len(a["content"]) > 0)
+
     results = articles.collect()
 
     # Elastic Search Code
@@ -106,12 +107,12 @@ def job():
     res = es.count(index="articles", doc_type="_doc", body=searchBody)
     articleCount = res["count"]
     res = es.search(index="articles", doc_type="_doc", body=searchBody, size=articleCount)
+    
     articles = res["hits"]["hits"]
     articles = [article["_source"] for article in articles]
     articles = sc.parallelize(articles)
-    articles = articles.map(lambda x: (x["url"], x))
-    articles = articles.reduceByKey(lambda x, y: x)
-    articles = articles.map(lambda x: x[1])
+    articles = articles.map(lambda x: (x["url"], x)).reduceByKey(lambda x, y: x).map(lambda x: x[1]).filter(lambda a: len(a["content"]) > 0)
+    
     results = articles.collect()
 
     res = es.delete_by_query(index="articles", doc_type='_doc', body=searchBody)
