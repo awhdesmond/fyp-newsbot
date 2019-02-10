@@ -12,6 +12,7 @@ from newsapi import NewsApiClient
 from newsagents.straitstimes import StraitsTimesAgent 
 from newsagents.cna import CNAAgent
 from newsagents.todayonline import TodayOnlineAgent
+from newsagents.scmp import SCMPAgent
 
 PAGE_SIZE = 50
 NUM_PAGES_PER_DOMAIN = 10
@@ -58,6 +59,8 @@ def fulfillArticleContent(metadata):
             agent = CNAAgent(url)
         elif source == "todayonline.com":
             agent = TodayOnlineAgent(url)
+        elif source == "scmp.com":
+            agent = SCMPAgent(url)
         else:
             article["content"] = ""
             return article
@@ -79,7 +82,7 @@ def job():
     conf = SparkConf().setMaster("local").setAppName("NewsAgent")
     sc = SparkContext(conf=conf)
 
-    domains = sc.parallelize(["straitstimes.com", "channelnewsasia.com", "todayonline.com"])
+    domains = sc.parallelize(["straitstimes.com", "channelnewsasia.com", "todayonline.com", "scmp.com"])
     domainsParams = domains.flatMap(generateDomainParmas)
     metadata = domainsParams.flatMap(fetchDomainArticlesMetadata)
     metadata = metadata.filter(filterNontextArticles).map(parseMetadata)
