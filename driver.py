@@ -4,6 +4,7 @@ import copy
 import sched, time
 
 from newsapi import NewsApiClient
+from pyspark import SparkConf, SparkContext
 
 from newsagents.straitstimes import StraitsTimesAgent 
 from newsagents.cna import CNAAgent
@@ -11,7 +12,7 @@ from newsagents.todayonline import TodayOnlineAgent
 from newsagents.scmp import SCMPAgent
 
 from elasticsearchManager import ElasticsearchManager
-from pyspark import SparkConf, SparkContext
+from nlpengine import NLPEngine
 
 # Logging
 logging.basicConfig(level=logging.INFO, filename='app.log', filemode='w', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -25,6 +26,9 @@ sparkContext = SparkContext(conf=conf)
 # Elasticsearch
 esManager = ElasticsearchManager()
 
+# NLPEngine
+nlpEngine = NLPEngine()
+
 PAGE_SIZE = 50
 NUM_PAGES_PER_DOMAIN = 10
 DOMAINS = ["straitstimes.com", "channelnewsasia.com", "todayonline.com", "scmp.com"]
@@ -34,7 +38,7 @@ API_CLIENTS = list(map(lambda key: NewsApiClient(api_key=key), API_KEYS))
 
 
 def _generateDomainParmas(domain):
-        return [(domain, page) for page in range(1, NUM_PAGES_PER_DOMAIN)]
+        return [(domain, page) for page in range(1, NUM_PAGES_PER_DOMAIN + 1)]
     
 def _fetchDomainArticlesMetadata(param):
     apiClient = random.choice(API_CLIENTS)
@@ -87,6 +91,16 @@ def _fulfillArticleContent(metadata):
         return article
 
 
+def _fulfillArticleNLP(article):
+    articleText = article["content"]
+    entities, spolt = nlpEngine.processText(articleText)
+    article["nlp"] = {
+            "entities": entities,
+            "spolt": spolt,
+    }
+    return article
+
+
 def fetchArticles():
     domains = sparkContext.parallelize(DOMAINS)
     domainsParams = domains.flatMap(_generateDomainParmas) 
@@ -97,6 +111,7 @@ def fetchArticles():
 
     articles = metadata.map(_fulfillArticleContent) \
                         .filter(lambda a: len(a["content"]) > 0)
+                        .map(_fulfillArticleNLP)
 
     results = articles.collect()
     return results
@@ -107,13 +122,20 @@ def newsbotJob():
     logging.info('Start of Spark Job.')
 
     articles = fetchArticles()
+    logging.info('Number of potentially new articles: %d', len(articles))
 
-    # Elastic Search Code
+    # Add articles into elasticsearch
+    esBody = []
     for article in articles:
-        esManager.indexDocument("articles", '_doc', article)
+        esBody.append({'index': {}})
+        esBody.append(article)
+    
+    esManager.bulk("articles", '_doc', esBody)
 
     # Remove Duplicates
     articleCount = esManager.indexCount("articles", '_doc')
+    logging.info('Number articles in es: %d', articleCount)
+
     searchBody = {
         "query": {
             "match_all": {}
@@ -131,10 +153,13 @@ def newsbotJob():
     results = indexArticles.collect()
     esManager.deleteByQuery("articles", "_doc", searchBody)
 
+    esBody = []
     for article in results:
-        esManager.indexDocument("articles", '_doc', article)
+        esBody.append({'index': {}})
+        esBody.append(article)
+    esManager.bulk("articles", '_doc', esBody)
 
-    logging.info('Number of articles added: %d', len(results))
+    logging.info('Number of articles added: %d', len(articles))
     logging.info('End of Spark Job.')
     
 
@@ -143,13 +168,7 @@ def runNewsbotJob(sc):
     scheduler.enter(10800, 1, runNewsbotJob, (sc,)) 
 
 def main():
-    newsbotJob()
-    # scheduler.enter(10800, 1, runNewsbotJob, (scheduler,))
-    # scheduler.run()
+    scheduler.enter(10800, 1, runNewsbotJob, (scheduler,))
+    scheduler.run()
 
 main()
-
-
-
-
-

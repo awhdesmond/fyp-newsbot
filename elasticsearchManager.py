@@ -28,3 +28,6 @@ class ElasticsearchManager(object):
 
     def deleteByQuery(self, index, docType, queryBody):
         return self.es.delete_by_query(index=index, doc_type=docType, body=queryBody)
+
+    def bulk(self, index, docType, body):
+        return self.es.bulk(index=index, doc_type=docType, body=body)
