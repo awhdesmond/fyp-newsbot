@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import requests
 
 from bs4 import BeautifulSoup
@@ -33,7 +31,7 @@ class CNAAgent(object):
         result_text = ""
 
         for text in texts:
-            if "©" not in text.get_text().encode('utf-8'):
+            if "©" not in text.get_text():
                 result_text = result_text + text.get_text() + "\n"
         
         return result_text

@@ -24,7 +24,7 @@ class ElasticsearchManager(object):
 
     # TODO: improve this
     def searchIndex(self, index, docType, searchBody, size=None):
-        return self.res = es.search(index=index, doc_type=docType, body=searchBody, size=size)
+        return self.es.search(index=index, doc_type=docType, body=searchBody, size=size)
 
     def deleteByQuery(self, index, docType, queryBody):
-        return self.es.delete_by_query(index=index, doc_type=docType, body=searchBody)
+        return self.es.delete_by_query(index=index, doc_type=docType, body=queryBody)
