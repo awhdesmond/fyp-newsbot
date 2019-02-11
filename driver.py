@@ -91,15 +91,6 @@ def _fulfillArticleContent(metadata):
         return article
 
 
-def _fulfillArticleNLP(article):
-    articleText = article["content"]
-    entities, spolt = nlpEngine.processText(articleText)
-    article["nlp"] = {
-            "entities": entities,
-            "spolt": spolt,
-    }
-    return article
-
 
 def fetchArticles():
     domains = sparkContext.parallelize(DOMAINS)
@@ -111,7 +102,6 @@ def fetchArticles():
 
     articles = metadata.map(_fulfillArticleContent) \
                         .filter(lambda a: len(a["content"]) > 0)
-                        .map(_fulfillArticleNLP)
 
     results = articles.collect()
     return results
@@ -127,6 +117,12 @@ def newsbotJob():
     # Add articles into elasticsearch
     esBody = []
     for article in articles:
+        articleText = article["content"]
+        entities, spolt = nlpEngine.processText(articleText)
+        article["nlp"] = {
+                "entities": entities,
+                "spolt": spolt,
+        }
         esBody.append({'index': {}})
         esBody.append(article)
     
@@ -168,7 +164,8 @@ def runNewsbotJob(sc):
     scheduler.enter(10800, 1, runNewsbotJob, (sc,)) 
 
 def main():
-    scheduler.enter(10800, 1, runNewsbotJob, (scheduler,))
-    scheduler.run()
+    newsbotJob()
+    #scheduler.enter(10800, 1, runNewsbotJob, (scheduler,))
+    #scheduler.run()
 
 main()
