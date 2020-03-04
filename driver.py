@@ -198,7 +198,10 @@ def main(config: conf.Config):
 
     delete_existing_articles(esManager)
     all_articles = existing_articles + news_api_articles + today_articles
-    add_articles_into_elasticsearch(esManager, all_articles)
+    all_articles_dict = {}
+    for a in all_articles:
+        all_articles_dict[a['url']] = a
+    add_articles_into_elasticsearch(esManager, all_articles_dict.values())
 
 
 def parse_cli_args():
