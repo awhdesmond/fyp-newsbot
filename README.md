@@ -31,6 +31,114 @@ rsync -avzh --progress root@206.189.42.104:/root/fyp-nlp/DATA_FOLDER /path/to/lo
 ```
 Note that when you run rsync it will prompt you for a password.
 
+## Setting up ES
+Once you create the elasticseaerch and kibana container, go to kibana on `localhost:5601` and find the console. Then, enter the following commands in the console to set up the elasticsearch indices.
+```
+PUT /articles
+
+POST /articles/_close
+
+PUT /articles/_settings
+{
+  "analysis": {
+    "filter": {
+      "english_stop" : {
+        "type": "stop",
+        "stopwords": "_english_"
+      },
+      "english_stemmer": {
+        "type": "stemmer",
+        "language": "english"
+      },
+      "english_possessive_stemmer": {
+        "type": "stemmer",
+        "language": "possessive_english"
+      },
+      "shingle_filter": {
+        "type": "shingle",
+        "min_shingle_size": 2,
+        "max_shingle_size": 2,
+        "output_unigrams": false
+      }
+    },
+    "analyzer": {
+      "rebuilt_english_shingle": {
+        "tokenizer": "standard",
+        "filter": [
+          "english_possessive_stemmer",
+          "lowercase",
+          "english_stop",
+          "english_stemmer",
+          "shingle_filter"
+        ]
+      },
+      "rebuilt_english": {
+        "tokenizer": "standard",
+        "filter": [
+          "english_possessive_stemmer",
+          "lowercase",
+          "english_stop",
+          "english_stemmer"
+        ]
+      }
+    }
+  }
+}
+
+PUT /articles/_mappings/_doc
+{
+  "properties": {
+    "content": {
+      "type": "text",
+      "analyzer": "rebuilt_english",
+      "fields": {
+        "shingles": {
+          "type": "text",
+          "analyzer": "rebuilt_english_shingle"
+        }
+      }
+    },
+    "title": {
+      "type": "text",
+      "analyzer": "rebuilt_english",
+      "fields": {
+        "shingles": {
+          "type": "text",
+          "analyzer": "rebuilt_english_shingle"
+        }
+      }
+    },
+    "author": {
+      "type": "text"
+    },
+    "source": {
+      "type": "text",
+      "index": false
+    },
+    "url": {
+      "type": "text",
+      "index": false
+    },
+    "imageurl": {
+      "type": "text",
+      "index": false
+    },
+    "publishedDate": {
+      "type": "date"
+    }
+  }
+}
+
+POST /articles/_open
+
+GET /articles/_doc/_search
+{
+  "query": {
+    "match_all": {}
+  }
+}
+```
+
 ## Running pinocchio-newsbot
 ```
 usage: driver.py [-h] [--config CONFIG] [--dump DUMP]
