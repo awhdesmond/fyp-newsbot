@@ -1,58 +1,28 @@
-import logging
+import argparse
 import random
 import copy
-import sched, time
+import json 
+import requests
 
+from typing import List, Dict
 from newsapi import NewsApiClient
-from pyspark import SparkConf, SparkContext
 
+import conf
+import elastic
 from newsagents.straitstimes import StraitsTimesAgent 
 from newsagents.cna import CNAAgent
 from newsagents.todayonline import TodayOnlineAgent
-from newsagents.scmp import SCMPAgent
 
-from elasticsearchManager import ElasticsearchManager
-from nlpengine import NLPEngine
-
-# Logging
-logging.basicConfig(level=logging.INFO, filename='app.log', filemode='w', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-# Scheduler
-scheduler = sched.scheduler(time.time, time.sleep)
-
-conf = SparkConf().setMaster("local").setAppName("NewsAgent")
-sparkContext = SparkContext(conf=conf)
-
-# Elasticsearch
-esManager = ElasticsearchManager()
-
-# NLPEngine
-nlpEngine = NLPEngine()
-
-PAGE_SIZE = 50
-NUM_PAGES_PER_DOMAIN = 10
-DOMAINS = ["straitstimes.com", "channelnewsasia.com", "todayonline.com", "scmp.com"]
- 
-API_KEYS = ["ed7f51d8a8824d83950c89a512bb0971", "c633303300c94234b6a78350b2aa8e82"]
-API_CLIENTS = list(map(lambda key: NewsApiClient(api_key=key), API_KEYS))
+import log
+logger = log.new_stream_logger(__name__)
 
 
-def _generateDomainParmas(domain):
-        return [(domain, page) for page in range(1, NUM_PAGES_PER_DOMAIN + 1)]
-    
-def _fetchDomainArticlesMetadata(param):
-    apiClient = random.choice(API_CLIENTS)
-    metadata = apiClient.get_everything(language='en', 
-                                        domains=param[0], 
-                                        page=param[1], 
-                                        page_size=PAGE_SIZE, 
-                                        sort_by="publishedAt")["articles"]
-    return metadata
+ES_ARTICLES_INDEX_NAME = "articles"
 
-def _filterNontextArticles(metadata):
-    return "www." in metadata["url"]
-
-def _parseMetadata(metadata):
+####################
+# Helper Functions #
+####################
+def _parse_metadata(metadata):
     return {
         "source"        : metadata["source"]["name"],
         "url"           : metadata["url"],
@@ -62,110 +32,197 @@ def _parseMetadata(metadata):
         "publishedDate" : metadata["publishedAt"]
     }
 
+def strip_url_query_params(article):
+    if "?" in article["url"]:
+        article["url"] = article["url"][0:article["url"].index("?")]
+    return article
 
-def _fulfillArticleContent(metadata):
-    url = metadata["url"]
-    source = metadata["source"].lower()
-    article = copy.deepcopy(metadata)
+########################
+# Today Pipeline Steps #
+########################
+def generate_today_urls(num_pages=10, page_size=50):
+    fmt_str = "https://www.todayonline.com/api/v3/news_feed/{}?items={}"
+    return [fmt_str.format(i, page_size) for i in range(1, num_pages)]
+    
+def generate_today_nodes(urls: List[str]):
+    totalNodes = []
+    agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36"
+    for url in urls:
+        res = requests.get(url, headers={ 'user-agent': agent })
+        nodes = res.json()["nodes"]
+        totalNodes.extend(nodes)
+    return totalNodes
 
-    try:
-        agent = None
-        if source == "straitstimes.com":
-            agent = StraitsTimesAgent(url)
-        elif source == "channelnewsasia.com":
-            agent = CNAAgent(url)
-        elif source == "todayonline.com":
-            agent = TodayOnlineAgent(url)
-        elif source == "scmp.com":
-            agent = SCMPAgent(url)
-        else:
-            article["content"] = ""
-            return article
-
-        article["content"] = agent.get_content()
-        return article
-
-    except Exception as e:
-        logging.error("An error occurred: %s", e)
-        article["content"] = ""
-        return article
-
-
-
-def fetchArticles():
-    domains = sparkContext.parallelize(DOMAINS)
-    domainsParams = domains.flatMap(_generateDomainParmas) 
-    metadata = domainsParams.flatMap(_fetchDomainArticlesMetadata) \
-                            .filter(_filterNontextArticles) \
-                            .map(_parseMetadata)
-    metadata.persist()
-
-    articles = metadata.map(_fulfillArticleContent) \
-                        .filter(lambda a: len(a["content"]) > 0)
-
-    results = articles.collect()
+def parse_today_nodes(nodes):
+    results = []
+    for node in nodes:
+        parsedNode =  {
+            "source": "todayonline.com",
+            "url": node["node"]["node_url"],
+            "imageurl": node["node"]["photo_4_3_image"],
+            "title": node["node"]["title"],
+            "author": node["node"]["author"][0]["name"] if len(node["node"]["author"]) > 0 else "",
+            "publishedDate": node["node"]["publication_date"].replace(" ", "T") + "Z"
+        }
+        results.append(parsedNode)
     return results
 
 
+##########################
+# NewsAPI Pipeline Steps #
+##########################
+def fetch_existing_articles(esManager: elastic.ElasticsearchManager):
+    """Fetch existing articles from elasticsearch db
+    """
+    logger.info("Fetching existing articles from elasticsearch")
+    existing_articles_count = esManager.indexCount(ES_ARTICLES_INDEX_NAME, "_doc")
+    logger.info(f"{existing_articles_count} of articles found")
+    searchBody = {
+         "query": {
+             "match_all": {}
+         }
+     }
+    existing_articles = esManager.searchIndex(
+        ES_ARTICLES_INDEX_NAME, 
+        "_doc", 
+        searchBody, 
+        size=existing_articles_count
+    )
+    existing_articles = [article["_source"] for article in existing_articles["hits"]["hits"]]
+    return existing_articles
 
-def newsbotJob():
-    logging.info('Start of Spark Job.')
 
-    articles = fetchArticles()
-    logging.info('Number of potentially new articles: %d', len(articles))
+def fetch_articles_metadata_from_news_api(
+    api_clients: List[NewsApiClient],
+    page_size=10,
+    num_pages=50,
+    domains=("straitstimes.com", "channelnewsasia.com")
+):
+    """fetch potentially new articles from news api
+    """
+    logger.info("Fetching articles metadata")
+    domain_page_pairs = [
+        (d, page) for page in range(1, num_pages + 1) for d in domains
+    ]
+    article_metadata = []
+    for domain, page in domain_page_pairs:
+        apiClient = random.choice(api_clients)
+        metadata = apiClient.get_everything(
+            language="en", 
+            domains=domain, 
+            page=page, 
+            page_size=page_size, 
+            sort_by="publishedAt"
+        )["articles"]
+        article_metadata.extend(metadata)
 
-    # Add articles into elasticsearch
+    article_metadata = [_parse_metadata(m) for m in article_metadata if "www." in m["url"]]
+    logger.info(f"Feteched {len(article_metadata)} articles metadata")
+    return article_metadata
+
+def fetch_articles_from_metadata_list(article_metadata: List[Dict]):
+    logger.info("Fetching articles content")
+    
+    articles = []
+    for metadata in article_metadata:
+        url = metadata["url"]
+        source = metadata["source"].lower()
+        article = copy.deepcopy(metadata)
+
+        try:
+            agent = None
+            if source == "straitstimes.com":
+                agent = StraitsTimesAgent(url)
+            elif source == "channelnewsasia.com":
+                agent = CNAAgent(url)
+            elif source == "todayonline.com":
+                agent = TodayOnlineAgent(url)
+            else:
+                article["content"] = ""
+                return article
+            article["content"] = agent.get_content()
+        except Exception as e:
+            logger.error("An error occurred: %s", e)
+            article["content"] = ""
+        articles.append(article)
+    
+    logger.info(f"Number of potentially new articles: {len(articles)}")
+    return articles
+
+def delete_existing_articles(esManager: elastic.ElasticsearchManager):
+    searchBody = {
+         "query": {
+             "match_all": {}
+         }
+     }
+    esManager.deleteByQuery(ES_ARTICLES_INDEX_NAME, "_doc", searchBody)
+
+def add_articles_into_elasticsearch(
+    esManager: elastic.ElasticsearchManager, 
+    articles: List[Dict]
+):
     esBody = []
     for article in articles:
-        articleText = article["content"]
-        entities, spolt = nlpEngine.processText(articleText)
-        article["nlp"] = {
-                "entities": entities,
-                "spolt": spolt,
-        }
         esBody.append({'index': {}})
         esBody.append(article)
+    esManager.bulk(ES_ARTICLES_INDEX_NAME, '_doc', esBody)
+    logger.info('Number of articles added: %d' % len(articles))
     
-    esManager.bulk("articles", '_doc', esBody)
+def dumpData(config: conf.Config, dump_path: str):
+    esManager = elastic.ElasticsearchManager(config.elasticsearch_config.host)
+    existing_articles = fetch_existing_articles(esManager)
+    with open(dump_path, 'w') as jsonfile:
+        json.dump(existing_articles, jsonfile)
 
-    # Remove Duplicates
-    articleCount = esManager.indexCount("articles", '_doc')
-    logging.info('Number articles in es: %d', articleCount)
 
-    searchBody = {
-        "query": {
-            "match_all": {}
-        }
-    }
-    response = esManager.searchIndex("articles", '_doc', searchBody, size=articleCount)
-    indexArticles = [article["_source"] for article in response["hits"]["hits"]]
-    indexArticles = sparkContext.parallelize(indexArticles)
-
-    indexArticles = indexArticles.map(lambda x: (x["url"], x)) \
-                                 .reduceByKey(lambda x, y: x) \
-                                 .map(lambda x: x[1]) \
-                                 .filter(lambda a: len(a["content"]) > 0)
+def main(config: conf.Config):
+    logger.info("Start of Newsbot Job")
+    esManager = elastic.ElasticsearchManager(config.elasticsearch_config.host)
+    api_clients = [NewsApiClient(api_key=k) for k in config.newsapi_config.api_keys]
     
-    results = indexArticles.collect()
-    esManager.deleteByQuery("articles", "_doc", searchBody)
-
-    esBody = []
-    for article in results:
-        esBody.append({'index': {}})
-        esBody.append(article)
-    esManager.bulk("articles", '_doc', esBody)
-
-    logging.info('Number of articles added: %d', len(articles))
-    logging.info('End of Spark Job.')
+    existing_articles = fetch_existing_articles(esManager)
     
+    # News API Pipeline
+    news_api_articles_metadata = fetch_articles_metadata_from_news_api(api_clients)
+    news_api_articles = fetch_articles_from_metadata_list(news_api_articles_metadata)
+    news_api_articles = [strip_url_query_params(a) for a in news_api_articles]
+    news_api_articles = [a for a in news_api_articles if a["content"]]
 
-def runNewsbotJob(sc): 
-    newsbotJob()
-    scheduler.enter(10800, 1, runNewsbotJob, (sc,)) 
+    # Today API Pipeline
+    today_urls = generate_today_urls()
+    today_nodes = generate_today_nodes(today_urls)
+    today_metadata = parse_today_nodes(today_nodes)
+    today_articles = fetch_articles_from_metadata_list(today_metadata)
+    today_articles = [a for a in today_articles if a["content"]]
 
-def main():
-    newsbotJob()
-    #scheduler.enter(10800, 1, runNewsbotJob, (scheduler,))
-    #scheduler.run()
+    delete_existing_articles(esManager)
+    all_articles = existing_articles + news_api_articles + today_articles
+    add_articles_into_elasticsearch(esManager, all_articles)
 
-main()
+
+def parse_cli_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "config", 
+        type=str, 
+        dest="config", 
+        help="path to config file"
+    )
+    parser.add_argument(
+        "dump", 
+        type=str,
+        default=None, 
+        dest="dump", 
+        help="path to dump existing articles before job"
+    )
+
+    args = parser.parse_args()
+    return args
+
+if __name__ == "__main__":
+    args = parse_cli_args()
+    config = conf.Config.from_file(args.config)
+    if args.dump:
+        dumpData(config, args.dump)
+
+    main(config)
