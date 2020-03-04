@@ -16,7 +16,8 @@ from newsagents.todayonline import TodayOnlineAgent
 import log
 logger = log.new_stream_logger(__name__)
 
-
+DEFAULT_NUM_PAGES = 1
+DEFAULT_PAGE_SIZE = 10
 ES_ARTICLES_INDEX_NAME = "articles"
 
 ####################
@@ -40,7 +41,7 @@ def strip_url_query_params(article):
 ########################
 # Today Pipeline Steps #
 ########################
-def generate_today_urls(num_pages=10, page_size=50):
+def generate_today_urls(num_pages=DEFAULT_NUM_PAGES, page_size=DEFAULT_PAGE_SIZE):
     fmt_str = "https://www.todayonline.com/api/v3/news_feed/{}?items={}"
     return [fmt_str.format(i, page_size) for i in range(1, num_pages)]
     
@@ -94,8 +95,8 @@ def fetch_existing_articles(esManager: elastic.ElasticsearchManager):
 
 def fetch_articles_metadata_from_news_api(
     api_clients: List[NewsApiClient],
-    page_size=10,
-    num_pages=50,
+    page_size=DEFAULT_PAGE_SIZE,
+    num_pages=DEFAULT_NUM_PAGES,
     domains=("straitstimes.com", "channelnewsasia.com")
 ):
     """fetch potentially new articles from news api
@@ -203,18 +204,19 @@ def main(config: conf.Config):
 def parse_cli_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "config", 
+        "--config", 
         type=str, 
         dest="config", 
         help="path to config file"
     )
     parser.add_argument(
-        "dump", 
+        "--dump", 
         type=str,
         default=None, 
         dest="dump", 
         help="path to dump existing articles before job"
     )
+
 
     args = parser.parse_args()
     return args
