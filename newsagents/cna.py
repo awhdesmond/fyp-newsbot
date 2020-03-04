@@ -28,5 +28,5 @@ class CNAAgent(object):
         soup = BeautifulSoup(self.res.text, features="lxml")
         texts = soup.select(".c-rte--article p")
 
-        result_text = "\n".join([t.get_text() from t in texts if "©" not in text.get_text()])
+        result_text = "\n".join([t.get_text() for t in texts if "©" not in text.get_text()])
         return result_text
