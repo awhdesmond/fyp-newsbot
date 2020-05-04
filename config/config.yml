@@ -3,4 +3,6 @@ newsapi:
   - ed7f51d8a8824d83950c89a512bb0971
   - c633303300c94234b6a78350b2aa8e82
 elasticsearch:
-  host: 206.189.42.104:9200
+  endpoint: localhost:9200
+  index: articles
+  doc_type: _doc

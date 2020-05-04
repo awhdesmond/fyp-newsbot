@@ -8,29 +8,33 @@ class NewsAPIConfig:
     @staticmethod
     def from_dict(d):
         return NewsAPIConfig(
-            api_keys=d['api_keys']
+            api_keys=d["api_keys"]
         )
 
 
 class ElasticSearchConfig:
-    def __init__(self, host):
-        self.host = host
+    def __init__(self, endpoint: str, index: str, doc_type: str):
+        self.endpoint = endpoint
+        self.index = index
+        self.doc_type = doc_type
 
     @staticmethod
     def from_dict(d):
         return ElasticSearchConfig(
-            host=d['host']
+            endpoint=d["endpoint"],
+            index=d["index"],
+            doc_type=d["doc_type"],
         )
 
 
 class Config:
     def __init__(
-        self, 
-        newsapi_config: NewsAPIConfig, 
-        elasticsearch_config: ElasticSearchConfig,
+        self,
+        newsapi: NewsAPIConfig,
+        elasticsearch: ElasticSearchConfig,
     ):
-        self.newsapi_config = newsapi_config
-        self.elasticsearch_config = elasticsearch_config
+        self.newsapi = newsapi
+        self.elasticsearch = elasticsearch
 
     @staticmethod
     def from_file(filepath: str):
@@ -41,7 +45,6 @@ class Config:
     @staticmethod
     def from_dict(d):
         return Config(
-            newsapi_config=NewsAPIConfig.from_dict(d['newsapi']),
-            elasticsearch_config=ElasticSearchConfig.from_dict(d['elasticsearch']),
+            newsapi=NewsAPIConfig.from_dict(d['newsapi']),
+            elasticsearch=ElasticSearchConfig.from_dict(d['elasticsearch']),
         )
-    
