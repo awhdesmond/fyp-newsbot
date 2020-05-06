@@ -1,5 +1,6 @@
 env
 .vscode
+articles.jsonl
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

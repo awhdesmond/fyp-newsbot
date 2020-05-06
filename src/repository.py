@@ -49,7 +49,7 @@ class ArticlesRepository:
             body=search_body,
             size=size
         )
-        return [article["_source"] for article in resp["hits"]["hits"]]
+        return [Article(**article["_source"]) for article in resp["hits"]["hits"]]
 
     def delete_all_articles(self):
         """

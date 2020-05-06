@@ -1,3 +1,3 @@
-import newsagents.cna
-import newsagents.straitstimes
-import pipeline
+import news_api.cna
+import news_api.straitstimes
+import news_api.pipeline

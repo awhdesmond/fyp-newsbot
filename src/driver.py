@@ -1,7 +1,4 @@
-
-
-import json
-from typing import List, Dict
+from typing import List
 
 import cli
 import conf
@@ -9,30 +6,23 @@ import repository
 import news_api
 import todayonline
 
-from newsagents.straitstimes import StraitsTimesAgent
-from newsagents.cna import CNAAgent
-from newsagents.todayonline import TodayOnlineAgent
-
 import log
-logger = log.new_stream_logger(__name__)
+logger = log.init_stream_logger(__name__)
 
 
-def dump_exisiting_data(config: conf.Config, dump_path: str):
+def dump_articles_to_path(articles: List, dump_path: str):
     """
     Dump all the data in the elasticsearch database to
     a local json file
     """
-    logger.info("Dumping Existing Articles...")
+    logger.info(f"Dumping Articles to {dump_path}")
 
-    repo = repository.ArticlesRepository(config.elasticsearch)
-    existing_articles = repo.list_articles()
+    with open(dump_path, "w+") as f:
+        for article in articles:
+            f.write(article.json())
+            f.write("\n")
 
-    logger.info(f"Found {len(existing_articles)} articles in the database")
-
-    with open(dump_path, 'w') as jsonfile:
-        json.dump(existing_articles, jsonfile)
-
-    logger.info("Dumping Existing Articles Completed")
+    logger.info("Dumping Articles Completed")
 
 
 def main(args, config: conf.Config):
@@ -55,6 +45,7 @@ def main(args, config: conf.Config):
         ],
         num_pages=args.num_pages,
         page_size=args.page_size,
+        start_date=args.start_date,
     ))
 
     # Today API Pipeline
@@ -69,14 +60,13 @@ def main(args, config: conf.Config):
     for a in all_articles:
         unique_articles[a.url] = a
 
+    if args.dump_path:
+        dump_articles_to_path(unique_articles.values(), args.dump_path)
+
     repo.bulk_insert(unique_articles.values())
 
 
 if __name__ == "__main__":
     args = cli.parse_cli_args()
     config = conf.Config.from_file(args.config)
-
-    if args.dump:
-        dump_exisiting_data(config, args.dump)
-
-    main(config)
+    main(args, config)

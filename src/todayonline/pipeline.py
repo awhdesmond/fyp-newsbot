@@ -23,7 +23,7 @@ class TodayPipeline:
 
         return [
             TodayPipeline.URLS_FORMAT_STRING.format(i, page_size)
-            for i in range(1, num_pages)
+            for i in range(1, num_pages + 1)
         ]
 
     def generate_articles(self, urls: List[str]):
@@ -32,7 +32,6 @@ class TodayPipeline:
         returned by accessing the provided urls
         """
         logger.info("Fetching todayonline metadata")
-
         total_articles = []
         for url in urls:
             res = requests.get(
@@ -53,7 +52,6 @@ class TodayPipeline:
                 content=raw["node"]["body"]
             )
             results.append(article)
-
         return results
 
     def generate(self, num_pages: int = 1, page_size: int = 10):

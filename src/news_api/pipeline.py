@@ -1,3 +1,5 @@
+import time
+import random
 from typing import List
 from newsapi import NewsApiClient
 
@@ -6,7 +8,7 @@ from common.models import Article
 from news_api import cna, straitstimes
 
 import log
-logger = log.new_stream_logger(__name__)
+logger = log.init_stream_logger(__name__)
 
 
 class NewsApiPipeline:
@@ -22,8 +24,9 @@ class NewsApiPipeline:
     def generate_articles(
         self,
         domains: List[str],
-        page_size=1,
-        num_pages=10,
+        num_pages=1,
+        page_size=10,
+        start_date=None,
     ):
         """
         Fetch potentially new articles from news api
@@ -36,26 +39,36 @@ class NewsApiPipeline:
         raw_metadata = []
         for idx, (domain, page) in enumerate(domain_page_pairs):
             client = self.api_clients[idx % len(self.api_clients)]
-            resp = client.get_everything(
+            kwargs = dict(
                 language="en",
                 domains=domain,
                 page=page,
                 page_size=page_size,
-                sort_by="publishedAt"
+                sort_by="publishedAt",
             )
+            if start_date:
+                kwargs["from_param"] = start_date
+            resp = client.get_everything(**kwargs)
             metadata = resp["articles"]
             raw_metadata.extend(metadata)
 
         articles = []
         for metadata in raw_metadata:
-            raw_metadata["url"] = self.strip_url_query_params(raw_metadata["url"])
-            article = Article(**raw_metadata)
+            params_dict = dict(
+                source=metadata["source"]["name"] or "",
+                url=self.strip_url_query_params(metadata["url"]) or "",
+                title=metadata["title"] or "",
+                imageurl=metadata["urlToImage"] or "",
+                author=metadata["author"] or "",
+                publishedDate=metadata["publishedAt"] or ""
+            )
+            article = Article(**params_dict)
             articles.append(article)
 
         logger.info(f"Feteched {len(articles)} articles")
         return articles
 
-    def generate_content(metadata: List[Article]):
+    def generate_content(self, metadata: List[Article]):
         """
         Fetch the actual article content from the url present
         in the metadata
@@ -63,6 +76,9 @@ class NewsApiPipeline:
         logger.info("Fetching articles content")
 
         for article in metadata:
+            sleep_time = random.randint(1, 5)
+            time.sleep(sleep_time)
+
             url = article.url
             source = article.source.lower()
 
@@ -81,8 +97,14 @@ class NewsApiPipeline:
         self,
         domains: List[str],
         num_pages: int = 1,
-        page_size: int = 10
+        page_size: int = 10,
+        start_date: str = None,
     ):
-        articles = self.generate_articles(domains, num_pages, page_size)
+        articles = self.generate_articles(
+            domains,
+            num_pages,
+            page_size,
+            start_date
+        )
         self.generate_content(articles)
         return articles
